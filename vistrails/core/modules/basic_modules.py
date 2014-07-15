@@ -991,6 +991,15 @@ class PythonSource(CodeRunnerMixin, NotCacheable, Module):
         s = urllib.unquote(str(self.get_input('source')))
         self.run_code(s, use_input=True, use_output=True)
 
+    def to_python_script(self, module, ident):
+        for f in module.functions:
+            if f.name == 'source':
+                code = urllib.unquote(str(f.parameters[0].strValue))
+                
+                code = ''.join([ident + i + '\n' for i in code.split('\n')])
+                return code
+        return ''
+
 ##############################################################################
 
 class SmartSource(CodeRunnerMixin, NotCacheable, Module):
