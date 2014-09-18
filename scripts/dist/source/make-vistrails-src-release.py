@@ -1,21 +1,21 @@
 ###########################################################
-# Nightly Git Release to Sourceforge                      #
+# Source Release to Sourceforge                      #
 # Author: Daniel S. Rees                                  #
 #                                                         #
 # Description:                                            #
-#     Creates and archives a tarball of a git             #
+#     Creates and archives a tarball of a subversion      #
 #     repository and uploads it to Sourceforge.           #
 #     Intended for use as a cronjob / scheduled task.     #
 #                                                         #
 # Instructions:                                           #
 #     Place this python script in a directory of its own. #
 #     Edit the configuration as needed.  If changes to    #
-#     a default git export are desired, modify the        #
+#     a default svn export are desired, modify the        #
 #     last_minute_changes() function as needed.           #
 #     Create a cronjob or scheduled task to run this      #
 #     python script nightly (or on some other interval).  #
 #                                                         #
-# Requires 'git' and 'scp' to be installed and accessible #
+# Requires 'svn' and 'scp' to be installed and accessible #
 # from a default environment (use Cygwin if on Windows).  #
 ###########################################################
 
@@ -38,16 +38,26 @@ GIT_URL = "git://www.vistrails.org/vistrails.git"
 # Global arguments for calls to the git command
 GIT_ARGS = ""
 
+# VisTrails Release Version
+VT_VERSION = '2.1.4'
+
+# Branch to be used to build release
+VT_BRANCH = 'v2.1'
+
+# Hash used in the release
+VT_HASH = '269e4808eca3'
+
 # Prefix of target git export dir (also used as prefix for log files)
-EXPORT_DIR_PREFIX = "vistrails-src-nightly"
+EXPORT_DIR_PREFIX = "vistrails-src-%s"%VT_VERSION
 
 # Suffix of target git export dir (instances of '?' will be replaced with git revision)
 EXPORT_DIR_SUFFIX = "-?"
 
 # Paths of files and/or directories to be removed from the exported repository (relative to export dir)
-EXPORT_DELETE_PATHS = [".git", ".gitignore", "dist", "packages"]
+EXPORT_DELETE_PATHS = [".git", ".gitignore", "scripts/dist", "contrib"]
 
 # Distribution Tarball name (Do not add ".tar.gz")
+# For releases, Tarball name will be always EXPORT_DIR_PREFIX+EXPORT_DIR_SUFFIX 
 TARBALL_NAME = "vistrails-src-nightly"
 
 # Sourceforge User Name
@@ -57,13 +67,13 @@ SF_USERNAME = "CHANGEME"
 SF_PROJECT = "vistrails"
 
 # Sourceforge target directory for upload (relative path from project root)
-SF_DIRNAME = "vistrails/nightly"
+SF_DIRNAME = "vistrails/v%s"%VT_VERSION
 
 # Path to private key for secure connection to Sourceforge (absolute path)
 SF_PRIVKEY_PATH = "/path/to/private/key/CHANGEME"
 
 # Flag determines if tarball is uploaded (Can be set manually here or conditionally in last_minute_changes())
-SF_DO_UPLOAD = True
+SF_DO_UPLOAD = False
 
 # Flag determines if tarball upload is forced - if True, overrides SF_DO_UPLOAD (don't set in last_minute_changes())
 SF_FORCE_UPLOAD = False
@@ -85,6 +95,9 @@ ARCHIVE_DIR = "archive"
 
 # Indentation level for tracebacks and git export log in the logfile
 INDENT = " "*12
+
+# Is this a release version? Changelist will not be created
+RELEASE = True
 
 #################################
 ###### Last Minute Changes ######
@@ -115,7 +128,7 @@ def last_minute_changes():
     global SF_DO_UPLOAD
 
     # Copy License
-    srcfile = "dist/mac/Input/LICENSE"
+    srcfile = "scripts/dist/mac/Input/LICENSE"
     info("Copying '%s' to export base dir ..." % srcfile)
     try:
         shutil.copy(os.path.join(EXPORT_DIRNAME, srcfile), os.path.join(EXPORT_DIRNAME, os.path.basename(srcfile)))
@@ -150,44 +163,55 @@ def last_minute_changes():
     finally:
         if f is not None:
             f.close()
-
-    # Write changelist with all revisions since last release
-    info("Writing CHANGELIST for revisions (%s - %s] ..." % (last_revision, REVISION))
-    f = None
-    try:
-        clist_filename = os.path.join(EXPORT_DIRNAME, "CHANGELIST")
-        if REVISION != last_revision:
-            f = open(clist_filename, "wb")
-            full_line = '-'*70
-            half_line = '-'*35
-            git_changelist_args = '--stat --pretty=format:"' + full_line + '%n' + full_line + '%n%nRevision: %H%nDate:     %ad%n%n%s%n%n%b%n' + half_line + '%n%nSummary of changes:%n"'
-            proc.call("%s log %s %s..%s" % (GIT_BASE_CMD, git_changelist_args, last_revision, REVISION), shell=True, stdout=f)
-            f.write(full_line + '\n' + full_line + '\n')
-        else:
-            f = open(clist_filename, "wb")
-            f.write("No changes since last release.")
-        if not os.path.isfile(clist_filename):
-            raise Exception("CHANGELIST file does not exist after write attempt.")
-    except:
-        error("Couldn't write CHANGELIST.")
-        raise
-    finally:
-        if f is not None:
-            f.close()
+    if RELEASE:
+        #Copy Release Notes
+        srcfile = "scripts/dist/windows/Input/releaseNotes.txt"
+        destfile = "RELEASE"
+        info("Copying '%s' to export base dir ..." % srcfile)
+        try:
+            shutil.copy(os.path.join("../..", srcfile), os.path.join(EXPORT_DIRNAME, destfile))
+        except:
+            error("Couldn't copy '%s' to export base dir.")
+            raise
+    else:
+        # Write changelist with all revisions since last release
+        info("Writing CHANGELIST for revisions (%s - %s] ..." % (last_revision, REVISION))
+        f = None
+        try:
+            clist_filename = os.path.join(EXPORT_DIRNAME, "CHANGELIST")
+            if REVISION != last_revision:
+                f = open(clist_filename, "wb")
+                full_line = '-'*70
+                half_line = '-'*35
+                git_changelist_args = '--stat --pretty=format:"' + full_line + '%n' + full_line + '%n%nRevision: %H%nDate:     %ad%n%n%s%n%n%b%n' + half_line + '%n%nSummary of changes:%n"'
+                proc.call("%s log %s %s..%s" % (GIT_BASE_CMD, git_changelist_args, last_revision, REVISION), shell=True, stdout=f)
+                f.write(full_line + '\n' + full_line + '\n')
+            else:
+                f = open(clist_filename, "wb")
+                f.write("No changes since last release.")
+            if not os.path.isfile(clist_filename):
+                raise Exception("CHANGELIST file does not exist after write attempt.")
+        except:
+            error("Couldn't write CHANGELIST.")
+            raise
+        finally:
+            if f is not None:
+                f.close()
 
     # Don't upload if there were no changes made today
     if SF_DO_UPLOAD:
-        try:
-            data = proc.Popen('%s log --pretty=format:"%%ai" %s^..' % (GIT_BASE_CMD, REVISION), shell=True, stdout=proc.PIPE).communicate()[0]
-            match = re.search(r"^([0-9]+-[0-9]+-[0-9]+) ", data)
-            if match.group(1) != DATETIME_START.strftime("%Y-%m-%d"):
-                info("No revisions made today - Disabling upload to Sourceforge ...")
-                SF_DO_UPLOAD = False
-            else:
-                info("Revisions made today - Allowing upload to Sourceforge ...")
-        except:
-            error("Couldn't determine if new revisions were made today.")
-            raise
+        if not RELEASE:
+            try:
+                data = proc.Popen('%s log --pretty=format:"%%ai" %s^..' % (GIT_BASE_CMD, REVISION), shell=True, stdout=proc.PIPE).communicate()[0]
+                match = re.search(r"^([0-9]+-[0-9]+-[0-9]+) ", data)
+                if match.group(1) != DATETIME_START.strftime("%Y-%m-%d"):
+                    info("No revisions made today - Disabling upload to Sourceforge ...")
+                    SF_DO_UPLOAD = False
+                else:
+                    info("Revisions made today - Allowing upload to Sourceforge ...")
+            except:
+                error("Couldn't determine if new revisions were made today.")
+                raise
 
 ############################################
 ###### Don't Modify Beyond This Point ######
@@ -199,7 +223,7 @@ def last_minute_changes():
 #####################
 
 # Starting datetime
-DATETIME_START = datetime.datetime.now()  - datetime.timedelta(days=1)
+DATETIME_START = datetime.datetime.now()
 
 # Timestamp for archival operation
 TIMESTAMP = DATETIME_START.strftime(TS_FORMAT)
@@ -231,6 +255,11 @@ GIT_EXPORT_CMD = "%s clone -v --progress %s %s" % (GIT_BASE_CMD, GIT_URL, EXPORT
 # Git revision command
 GIT_REVISION_CMD = "%s rev-parse HEAD" % GIT_BASE_CMD
 
+#Git checkout command
+GIT_CHECKOUT_CMD = "%s --work-tree=%s checkout %s" %(GIT_BASE_CMD, EXPORT_DIRNAME, VT_BRANCH)
+
+GIT_CHECKOUT_CMD2 = "%s --work-tree=%s checkout %s" %(GIT_BASE_CMD, EXPORT_DIRNAME, VT_HASH)
+
 # Sourceforge upload command
 SF_UPLOAD_CMD = "scp -v -i %s %s %s,%s@frs.sourceforge.net:/home/frs/project/%s/%s/%s/%s" % (
                     SF_PRIVKEY_PATH, TARBALL_FILENAME, SF_USERNAME, SF_PROJECT, SF_PROJECT[0],
@@ -252,7 +281,7 @@ ERROR_MAKE_TARBALL           = ( 9, "Couldn't make tarball.")
 ERROR_CLEAN_EXPORT_DIR       = (10, "Couldn't remove export directory.")
 ERROR_ARCHIVE_TARBALL        = (11, "Couldn't copy tarball to archive.")
 ERROR_SF_UPLOAD              = (12, "Couldn't upload tarball to Sourceforge.")
-
+ERROR_CHECKOUT_GIT           = (13, "Couldn't checkout a branch in the repository.")
 
 def debug(msg):
     if os.path.isfile(LOG_FILENAME):
@@ -324,6 +353,34 @@ if __name__ == "__main__":
             raise Exception("Git export failed with return code: %s" % export_proc.returncode)
     except:
         errexit(ERROR_EXPORT_GIT)
+        
+    if VT_BRANCH != 'master':
+        info("Checking out branch %s ..."%VT_BRANCH)
+        debug("Checkout commands: %s" % GIT_CHECKOUT_CMD)
+        try:
+            checkout_proc = proc.Popen(GIT_CHECKOUT_CMD, shell=True, stdout=proc.PIPE, stderr=proc.STDOUT)
+            checkout_log = checkout_proc.communicate()[0]
+            # Indent checkout log and write to logfile
+            checkout_log = "\n".join([INDENT + line for line in checkout_log.splitlines()])
+            debug("Git Checkout Log:\n%s" % checkout_log)
+            if checkout_proc.returncode != 0:
+                raise Exception("Git checkout failed with return code: %s" % checkout_proc.returncode)
+        except:
+            errexit(ERROR_CHECKOUT_GIT)
+
+    if VT_HASH != "":
+        info("Checking out hash %s ..."%VT_HASH)
+        debug("Checkout commands: %s" % GIT_CHECKOUT_CMD2)
+        try:
+            checkout_proc = proc.Popen(GIT_CHECKOUT_CMD2, shell=True, stdout=proc.PIPE, stderr=proc.STDOUT)
+            checkout_log = checkout_proc.communicate()[0]
+            # Indent checkout log and write to logfile
+            checkout_log = "\n".join([INDENT + line for line in checkout_log.splitlines()])
+            debug("Git Checkout Log:\n%s" % checkout_log)
+            if checkout_proc.returncode != 0:
+                raise Exception("Git checkout failed with return code: %s" % checkout_proc.returncode)
+        except:
+            errexit(ERROR_CHECKOUT_GIT)
 
     info("Getting revision number ...")
     debug("Revision Command: %s" % GIT_REVISION_CMD)
@@ -343,6 +400,7 @@ if __name__ == "__main__":
         new_export_dirname = EXPORT_DIRNAME + EXPORT_DIR_SUFFIX.replace("?", REVISION[0:12])
         os.rename(EXPORT_DIRNAME, new_export_dirname)
         EXPORT_DIRNAME = new_export_dirname
+        TARBALL_FILENAME = "%s.tar.gz"%(EXPORT_DIRNAME)
         # Update git base cmd to point to renamed dir (in case it is needed in last_minute_changes())
         GIT_BASE_CMD = ("git --git-dir=%s/.git %s" % (EXPORT_DIRNAME, GIT_ARGS)).strip()
     except:
@@ -381,11 +439,11 @@ if __name__ == "__main__":
         if tarball is not None:
             tarball.close()
 
-    info("Removing export directory: '%s' ..." % EXPORT_DIRNAME)
-    try:
-        shutil.rmtree(EXPORT_DIRNAME)
-    except:
-        errexit(ERROR_CLEAN_EXPORT_DIR)
+    #info("Removing export directory: '%s' ..." % EXPORT_DIRNAME)
+    #try:
+    #    shutil.rmtree(EXPORT_DIRNAME)
+    #except:
+    #    errexit(ERROR_CLEAN_EXPORT_DIR)
 
     info("Archiving tarball to: '%s' ..." % ARCHIVE_TARBALL_FILENAME)
     try:

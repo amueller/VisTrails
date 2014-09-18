@@ -54,7 +54,7 @@ import zipfile
 from vistrails.db import VistrailsDBException
 from vistrails.db.domain import DBVistrail, DBWorkflow, DBLog, DBAbstraction, DBGroup, \
     DBRegistry, DBWorkflowExec, DBOpmGraph, DBProvDocument, DBAnnotation, \
-    DBMashuptrail
+    DBMashuptrail, DBStartup
 import vistrails.db.services.abstraction
 import vistrails.db.services.log
 import vistrails.db.services.opm
@@ -63,7 +63,7 @@ import vistrails.db.services.registry
 import vistrails.db.services.workflow
 import vistrails.db.services.vistrail
 from vistrails.db.versions import getVersionDAO, currentVersion, getVersionSchemaDir, \
-    translate_vistrail, translate_workflow, translate_log, translate_registry
+    translate_vistrail, translate_workflow, translate_log, translate_registry, translate_startup
 
 import unittest
 import vistrails.core.system
@@ -687,15 +687,17 @@ def open_vistrail_from_xml(filename):
     try:
         daoList = getVersionDAO(version)
         vistrail = daoList.open_from_xml(filename, DBVistrail.vtType, tree)
+        if vistrail is None:
+            raise VistrailsDBException("Couldn't read vistrail from XML")
         vistrail = translate_vistrail(vistrail, version)
         vistrails.db.services.vistrail.update_id_scope(vistrail)
     except VistrailsDBException, e:
         if str(e).startswith('VistrailsDBException: Cannot find DAO for'):
-            msg = "This vistrail was created by a newer version of VisTrails "
-            msg += "and cannot be opened."
-            raise VistrailsDBException(msg)
+            raise VistrailsDBException(
+                "This vistrail was created by a newer version of VisTrails "
+                "and cannot be opened.")
         raise e
-        
+
     return vistrail
 
 def open_vistrail_bundle_from_zip_xml(filename):
@@ -1098,6 +1100,8 @@ def open_workflow_from_xml(filename):
     version = get_version_for_xml(tree.getroot())
     daoList = getVersionDAO(version)
     workflow = daoList.open_from_xml(filename, DBWorkflow.vtType, tree)
+    if workflow is None:
+        raise VistrailsDBException("Couldn't read workflow from XML")
     workflow = translate_workflow(workflow, version)
     vistrails.db.services.workflow.update_id_scope(workflow)
     return workflow
@@ -1376,6 +1380,8 @@ def open_registry_from_xml(filename):
     version = get_version_for_xml(tree.getroot())
     daoList = getVersionDAO(version)
     registry = daoList.open_from_xml(filename, DBRegistry.vtType, tree)
+    if registry is None:
+        raise VistrailsDBException("Couldn't read registry from XML")
     registry = translate_registry(registry, version)
     vistrails.db.services.registry.update_id_scope(registry)
     return registry
@@ -1776,6 +1782,34 @@ def save_mashuptrails_to_db(mashuptrails, vt_id, db_connection, do_copy=False):
 
         except Exception, e:
             debug.critical('Could not save mashuptrail to db: %s' % str(e))
+
+def open_startup_from_xml(filename):
+    tree = ElementTree.parse(filename)
+    version = get_version_for_xml(tree.getroot())
+    if version == '0.1':
+        version = '1.0.3'
+    daoList = getVersionDAO(version)
+    startup = daoList.open_from_xml(filename, DBStartup.vtType, tree)
+    # need this for translation...
+    startup._filename = filename
+    startup = translate_startup(startup, version)
+    # vistrails.db.services.startup.update_id_scope(startup)
+    return startup
+
+def save_startup_to_xml(startup, filename, version=None):
+    tags = {}
+    if version is None:
+        version = currentVersion
+    if not startup.db_version:
+        startup.db_version = currentVersion
+    # FIXME add translation, etc.
+    # startup = translate_startup(startup, startup.db_version, version)
+
+    daoList = getVersionDAO(version)
+    daoList.save_to_xml(startup, filename, tags, version)
+    # startup = translate_startup(startup, version)
+    return startup
+    
 
 ##############################################################################
 # I/O Utilities

@@ -118,6 +118,10 @@ def main():
     import locale
     locale.setlocale(locale.LC_ALL, '')
 
+    # Log to the console
+    from vistrails.core import debug
+    debug.DebugPrint.getInstance().log_to_console()
+
     from vistrails.gui.requirements import require_pyqt4_api2
     require_pyqt4_api2()
 
@@ -142,11 +146,11 @@ def main():
             app.finishSession()
         import traceback
         print >>sys.stderr, "Uncaught exception on initialization: %s" % (
-                traceback._format_final_exc_line(type(e).__name__, e))
-        traceback.print_exc(sys.stderr)
+                traceback._format_final_exc_line(type(e).__name__, e).strip())
+        traceback.print_exc(None, sys.stderr)
         sys.exit(255)
-    if (app.temp_configuration.interactiveMode and
-        not app.temp_configuration.check('spreadsheetDumpCells')):
+    if (not app.temp_configuration.batch and
+        not app.temp_configuration.check('outputDirectory')):
         v = app.exec_()
 
     vistrails.gui.application.stop_application()

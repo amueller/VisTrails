@@ -61,9 +61,11 @@ class ConstantWidgetMixin(object):
 
     def __init__(self, contents=None):
         self._last_contents = contents
+        self.psi = None
 
     def update_parent(self):
         newContents = self.contents()
+        
         if newContents != self._last_contents:
             if self.parent() and hasattr(self.parent(), 'updateMethod'):
                 self.parent().updateMethod()
@@ -82,6 +84,7 @@ class ConstantWidgetBase(ConstantWidgetMixin):
             value = param.strValue
         ConstantWidgetMixin.__init__(self, value)
 
+        self.psi = psi
         if psi and psi.default:
             self.setDefault(psi.default)
         self.setContents(param.strValue)
@@ -145,7 +148,7 @@ class StandardConstantWidget(QtGui.QLineEdit, ConstantWidgetBase):
         ConstantWidgetBase.__init__(self, param)
         self.connect(self, QtCore.SIGNAL("returnPressed()"), 
                      self.update_parent)
-        
+
     def setContents(self, value, silent=False):
         self.setText(expression.evaluate_expressions(value))
         if not silent:
@@ -154,6 +157,16 @@ class StandardConstantWidget(QtGui.QLineEdit, ConstantWidgetBase):
     def contents(self):
         contents = expression.evaluate_expressions(unicode(self.text()))
         self.setText(contents)
+        try:
+            self.psi and \
+            self.psi.descriptor.module.translate_to_python(contents)
+        except Exception, e:
+            # Color background yellow and add tooltip
+            self.setStyleSheet("border:2px dashed #efef00;")
+            self.setToolTip("Invalid value: %s" % str(e))
+        else:
+            self.setStyleSheet("")
+            self.setToolTip("")
         return contents
 
     def setDefault(self, value):
@@ -233,64 +246,6 @@ class MultiLineStringWidget(QtGui.QTextEdit, ConstantWidgetBase):
 ###############################################################################
 # File Constant Widgets
 
-class PathChooserToolButton(QtGui.QToolButton):
-    """
-    PathChooserToolButton is a toolbar button that opens a browser for
-    paths.  The lineEdit is updated with the pathname that is selected.
-
-    """
-    def __init__(self, parent=None, lineEdit=None, toolTip=None):
-        """
-        PathChooserToolButton(parent: QWidget, 
-                              lineEdit: StandardConstantWidget) ->
-                 PathChooserToolButton
-
-        """
-        QtGui.QToolButton.__init__(self, parent)
-        self.setIcon(QtGui.QIcon(
-                self.style().standardPixmap(QtGui.QStyle.SP_DirOpenIcon)))
-        self.setIconSize(QtCore.QSize(12,12))
-        if toolTip is None:
-            toolTip = 'Open a file chooser'
-        self.setToolTip(toolTip)
-        self.setAutoRaise(True)
-        self.lineEdit = lineEdit
-        self.connect(self,
-                     QtCore.SIGNAL('clicked()'),
-                     self.runDialog)
-
-    def setPath(self, path):
-        """
-        setPath() -> None
-
-        """
-        if self.lineEdit and path:
-            self.lineEdit.setText(path)
-            self.lineEdit.update_parent()
-            self.parent().update_parent()
-    
-    def openChooser(self):
-        text = self.lineEdit.text() or system.vistrails_data_directory()
-        fileName = QtGui.QFileDialog.getOpenFileName(self,
-                                                     'Use Filename '
-                                                     'as Value...',
-                                                     text,
-                                                     'All files '
-                                                     '(*.*)')
-        return self.setDataDirectory(fileName)
-
-    def runDialog(self):
-        path = self.openChooser()
-        self.setPath(path)
-
-    def setDataDirectory(self, path):
-        if path:
-            absPath = os.path.abspath(str(QtCore.QFile.encodeName(path)))
-            dirName = os.path.dirname(absPath)
-            system.set_vistrails_data_directory(dirName)
-            return absPath
-        return path
-
 class PathChooserWidget(QtGui.QWidget, ConstantWidgetMixin):
     """
     PathChooserWidget is a widget containing a line edit and a button that
@@ -315,8 +270,14 @@ class PathChooserWidget(QtGui.QWidget, ConstantWidgetMixin):
         layout.addWidget(self.browse_button)
         self.setLayout(layout)
 
-    def create_browse_button(self):
-        return PathChooserToolButton(self, self.line_edit)
+    def create_browse_button(self, cls=None):
+        from vistrails.gui.common_widgets import QPathChooserToolButton
+        if cls is None:
+            cls = QPathChooserToolButton
+        button = cls(self, self.line_edit, 
+                     defaultPath=system.vistrails_data_directory())
+        button.pathChanged.connect(self.update_parent)
+        return button
 
     def updateMethod(self):
         if self.parent() and hasattr(self.parent(), 'updateMethod'):
@@ -353,59 +314,23 @@ class PathChooserWidget(QtGui.QWidget, ConstantWidgetMixin):
         if self.parent():
             QtCore.QCoreApplication.sendEvent(self.parent(), event)
 
-class FileChooserToolButton(PathChooserToolButton):
-    def __init__(self, parent=None, lineEdit=None):
-        PathChooserToolButton.__init__(self, parent, lineEdit, 
-                                       "Open a file chooser")
-        
-    def openChooser(self):
-        text = self.lineEdit.text() or system.vistrails_data_directory()
-        path = QtGui.QFileDialog.getOpenFileName(self,
-                                                 'Use Filename '
-                                                 'as Value...',
-                                                 text,
-                                                 'All files '
-                                                 '(*.*)')
-        return self.setDataDirectory(path)
-
 class FileChooserWidget(PathChooserWidget):
     def create_browse_button(self):
-        return FileChooserToolButton(self, self.line_edit)
-
-
-class DirectoryChooserToolButton(PathChooserToolButton):
-    def __init__(self, parent=None, lineEdit=None):
-        PathChooserToolButton.__init__(self, parent, lineEdit, 
-                                       "Open a directory chooser")
-
-    def openChooser(self):
-        text = self.lineEdit.text() or system.vistrails_data_directory()
-        path = QtGui.QFileDialog.getExistingDirectory(self,
-                                                      'Use Directory '
-                                                      'as Value...',
-                                                      text)
-        return self.setDataDirectory(path)
+        from vistrails.gui.common_widgets import QFileChooserToolButton
+        return PathChooserWidget.create_browse_button(self, 
+                                                      QFileChooserToolButton)
 
 class DirectoryChooserWidget(PathChooserWidget):
     def create_browse_button(self):
-        return DirectoryChooserToolButton(self, self.line_edit)
-
-class OutputPathChooserToolButton(PathChooserToolButton):
-    def __init__(self, parent=None, lineEdit=None):
-        PathChooserToolButton.__init__(self, parent, lineEdit,
-                                       "Open a path chooser")
-    
-    def openChooser(self):
-        text = self.lineEdit.text() or system.vistrails_data_directory()
-        path = QtGui.QFileDialog.getSaveFileName(self,
-                                                 'Save Path',
-                                                 text,
-                                                 'All files (*.*)')
-        return self.setDataDirectory(path)
+        from vistrails.gui.common_widgets import QDirectoryChooserToolButton
+        return PathChooserWidget.create_browse_button(self, 
+                                                QDirectoryChooserToolButton)
 
 class OutputPathChooserWidget(PathChooserWidget):
     def create_browse_button(self):
-        return OutputPathChooserToolButton(self, self.line_edit)
+        from vistrails.gui.common_widgets import QOutputPathChooserToolButton
+        return PathChooserWidget.create_browse_button(self, 
+                                                QOutputPathChooserToolButton)
 
 ###############################################################################
 # Constant Boolean widget

@@ -753,7 +753,7 @@ class UpgradeWorkflowHandler(object):
                                                        old_module_t[0])
             else:
                 new_module_desc = reg.get_descriptor(new_module_type)
-                new_module_t = new_module_desc.spec_tuple()
+                new_module_t = new_module_desc.spec_tuple
 
             new_pkg_version = module_remap.output_version
             if (new_pkg_version is None or
@@ -944,10 +944,9 @@ class TestUpgradePackageRemap(unittest.TestCase):
         from vistrails.core.application import get_vistrails_application
 
         app = get_vistrails_application()
-        app.new_vistrail()
-        default_upgrade_on = app.temp_configuration.upgradeOn
+        default_upgrades = app.temp_configuration.upgrades
         default_upgrade_delay = app.temp_configuration.upgradeDelay
-        app.temp_configuration.upgradeOn = True
+        app.temp_configuration.upgrades = True
         app.temp_configuration.upgradeDelay = False
 
         created_vistrail = False
@@ -982,7 +981,7 @@ class TestUpgradePackageRemap(unittest.TestCase):
                 pm.late_disable_package('upgrades')
             except MissingPackage:
                 pass
-            app.temp_configuration.upgradeOn = default_upgrade_on
+            app.temp_configuration.upgrades = default_upgrades
             app.temp_configuration.upgradeDelay = default_upgrade_delay
 
 if __name__ == '__main__':

@@ -55,6 +55,7 @@ from vistrails.core.log.log import Log
 from vistrails.core.modules.abstraction import identifier as abstraction_pkg, \
     version as abstraction_ver
 from vistrails.core.modules.basic_modules import identifier as basic_pkg
+from vistrails.core.modules.module_descriptor import ModuleDescriptor
 import vistrails.core.modules.module_registry
 from vistrails.core.modules.module_registry import ModuleRegistryException, \
     MissingModuleVersion, MissingModule, MissingPackageVersion, MissingPort, \
@@ -69,7 +70,8 @@ from vistrails.core.thumbnails import ThumbnailCache
 from vistrails.core.upgradeworkflow import UpgradeWorkflowHandler, UpgradeWorkflowError
 from vistrails.core.utils import VistrailsInternalError, PortAlreadyExists, DummyView, \
     InvalidPipeline
-from vistrails.core.system import vistrails_default_file_type
+from vistrails.core.system import vistrails_default_file_type, \
+    get_vistrails_directory
 from vistrails.core.vistrail.abstraction import Abstraction
 from vistrails.core.vistrail.action import Action
 from vistrails.core.vistrail.annotation import Annotation
@@ -210,7 +212,7 @@ class VistrailController(object):
         self._pipelines = {0: Pipeline()}
 
     def logging_on(self):
-        return not get_vistrails_configuration().check('nologger')
+        return get_vistrails_configuration().check('executionLog')
             
     def get_logger(self):
         if self.logging_on():
@@ -555,15 +557,20 @@ class VistrailController(object):
             self.recompute_terse_graph()
             self.invalidate_version_tree(False)
 
-    def perform_action(self, action):
+    def perform_action(self, action, do_validate=True, raise_exception=False):
         """ performAction(action: Action) -> timestep
-        
+
         Performs given action on current pipeline.
-        
+
+        By default, the resulting pipeline will get validated, but no exception
+        will be raised if it is invalid. However you will get these on your
+        next call to change_selected_version().
         """
         if action is not None:
             self.current_pipeline.perform_action(action)
             self.current_version = action.db_id
+            if do_validate:
+                self.validate(self.current_pipeline, raise_exception)
             return action.db_id
         return None
 
@@ -1889,16 +1896,13 @@ class VistrailController(object):
         
     def get_abstraction_dir(self):
         conf = get_vistrails_configuration()
-        if conf.check('abstractionsDirectory'):
-            abstraction_dir = conf.abstractionsDirectory
-            if not os.path.exists(abstraction_dir):
-                raise VistrailsInternalError("Cannot find %s" % \
-                                                 abstraction_dir)
-            return abstraction_dir
-        else:
-            raise VistrailsInternalError("'abstractionsDirectory' not"
+        abstraction_dir = get_vistrails_directory("subworkflowsDir")
+        if abstraction_dir is None:
+            raise VistrailsInternalError("'subworkflowsDir' not"
                                          " specified in configuration")
-        return None
+        elif not os.path.exists(abstraction_dir):
+            raise VistrailsInternalError("Cannot find %s" % abstraction_dir)
+        return abstraction_dir
 
     def get_abstraction_desc(self, package, name, namespace, module_version=None):
         reg = vistrails.core.modules.module_registry.get_module_registry()
@@ -3256,7 +3260,7 @@ class VistrailController(object):
                                     return new_actions
             return new_actions
 
-        if get_vistrails_configuration().check('upgradeOn'):
+        if get_vistrails_configuration().check('upgrades'):
             cur_pipeline = copy.copy(e._pipeline)
             # note that cur_pipeline is modified to be the result of
             # applying the actions in new_actions
@@ -3421,9 +3425,12 @@ class VistrailController(object):
             if from_root:
                 result = self.vistrail.getPipeline(version)
             elif version == self.current_version:
-                # we don't even need to check connection specs or
-                # registry
-                return self.current_pipeline
+                # Changing to current pipeline
+                # We only need to run validation if it was previously invalid
+                # (or didn't get validated)
+                result = self.current_pipeline
+                if self.current_pipeline.is_valid:
+                    return result
             # Fast check: if target is cached, copy it and we're done.
             elif version in self._pipelines:
                 result = copy.copy(self._pipelines[version])

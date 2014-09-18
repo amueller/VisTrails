@@ -51,6 +51,7 @@ from vistrails.core.modules.config import ConstantWidgetConfig, \
 import vistrails.core.modules.vistrails_module
 from vistrails.core.modules.module_descriptor import ModuleDescriptor
 from vistrails.core.modules.package import Package
+from vistrails.core.requirements import MissingRequirement
 import vistrails.core.modules.utils
 from vistrails.core.utils import VistrailsInternalError, memo_method, \
     InvalidModuleClass, ModuleAlreadyExists, append_to_dict_of_lists, \
@@ -641,24 +642,7 @@ class ModuleRegistry(DBRegistry):
         # this can be slow
         self.setup_indices()
 
-    def create_default_package(self):
-        basic_pkg = get_vistrails_basic_pkg_id()
-        default_codepath = os.path.join(vistrails_root_directory(), 
-                                        "core", "modules", "basic_modules.py")
-        self._default_package = \
-            Package(id=self.idScope.getNewId(Package.vtType),
-                    codepath=default_codepath,
-                    load_configuration=False,
-                    identifier=basic_pkg,
-                    name='Basic Modules',
-                    version=vistrails_version(),
-                    description="Basic modules for VisTrails")
-        # FIXME need to serialize old_identifiers!
-        self._default_package.old_identifiers = ['edu.utah.sci.vistrails.basic']
-        self.add_package(self._default_package)
-        return self._default_package
-
-    def has_abs_upgrade(self, identifier, name, namespace='', 
+    def has_abs_upgrade(self, identifier, name, namespace='',
                         package_version='', module_version=''):
 
         # if this fails, we want to raise the exception
@@ -686,28 +670,6 @@ class ModuleRegistry(DBRegistry):
 
     ##########################################################################
     # Per-module registry functions
-
-    def add_hierarchy(self, global_registry, module):
-        # a per-module registry needs to have all the module hierarchy
-        # registered there so that add_module doesn't fail with
-        # missing base class. We do _NOT_ add the ports, so watch out!
-        
-        reg = global_registry
-        d = reg.get_descriptor_by_name(module.package, module.name, 
-                                       module.namespace)
-        # we exclude the first module in the hierarchy because it's Module
-        # which we know exists (constructor adds)
-        hierarchy = reg.get_module_hierarchy(d)
-        for desc in reversed(hierarchy[:-1]):
-            old_base = desc.base_descriptor
-            base_descriptor = self.get_descriptor_by_name(old_base.package,
-                                                          old_base.name,
-                                                          old_base.namespace)
-            # FIXME: this package_version should live on descriptor?
-            package = self.get_package_by_name(desc.package)
-            self.update_registry(base_descriptor, desc.module, desc.package, 
-                                 desc.name, desc.namespace, package.version,
-                                 desc.version)
 
     def get_package_by_name(self, identifier, package_version=''):
         package_version = package_version or ''
@@ -1097,17 +1059,7 @@ class ModuleRegistry(DBRegistry):
         meant to be used by the packagemanager, when inspecting the package
         contents."""
         if isinstance(module, type):
-            if '_settings' in module.__dict__:
-                settings = module.__dict__['_settings']
-                if isinstance(settings, ModuleSettings):
-                    return self.add_module_from_settings(module, settings)
-                elif isinstance(settings, dict):
-                    return self.add_module(module, **settings)
-                else:
-                    raise TypeError("Expected module._settings to be "
-                                    "ModuleSettings or dict")
-            else:
-                return self.add_module(module)
+            return self.add_module(module)
         elif (isinstance(module, tuple) and
               len(module) == 2 and
               isinstance(module[0], type) and
@@ -1125,26 +1077,42 @@ class ModuleRegistry(DBRegistry):
         add_module.
 
         """
-        remap = {'configureWidgetType': 'configure_widget',
-                 'constantWidget': 'constant_widget',
-                 'constantWidgets': 'constant_widgets',
-                 'signatureCallable': 'signature',
-                 'constantSignatureCallable': 'constant_signature',
-                 'moduleColor': 'color',
-                 'moduleFringe': 'fringe',
-                 'moduleLeftFringe': 'left_fringe',
-                 'moduleRightFringe': 'right_fringe',
-                 'is_abstract': 'abstract'}
+        def remap_dict(d):
+            remap = {'configureWidgetType': 'configure_widget',
+                     'constantWidget': 'constant_widget',
+                     'constantWidgets': 'constant_widgets',
+                     'signatureCallable': 'signature',
+                     'constantSignatureCallable': 'constant_signature',
+                     'moduleColor': 'color',
+                     'moduleFringe': 'fringe',
+                     'moduleLeftFringe': 'left_fringe',
+                     'moduleRightFringe': 'right_fringe',
+                     'is_abstract': 'abstract'}
+            remapped_d = {}
+            for k, v in d.iteritems():
+                if k in remap:
+                    remapped_d[remap[k]] = v
+                else:
+                    remapped_d[k] = v
+            return remapped_d
 
-        remapped_kwargs = {}
-        for k, v in kwargs.iteritems():
-            if k in remap:
-                remapped_kwargs[remap[k]] = v
+        module_settings = None
+        if '_settings' in module.__dict__:
+            settings = module.__dict__['_settings']
+            if isinstance(settings, ModuleSettings):
+                module_settings = settings
+            elif isinstance(settings, dict):
+                module_settings = ModuleSettings(**remap_dict(settings))
             else:
-                remapped_kwargs[k] = v
+                raise TypeError("Expected module._settings to be "
+                                "ModuleSettings or dict")
                 
-        settings = ModuleSettings(**remapped_kwargs)
-        return self.add_module_from_settings(module, settings)
+        remapped_kwargs = remap_dict(kwargs)
+        if module_settings is not None:
+            module_settings = module_settings._replace(**remapped_kwargs)
+        else:
+            module_settings = ModuleSettings(**remapped_kwargs)
+        return self.add_module_from_settings(module, module_settings)
 
     def add_module_from_settings(self, module, settings):
         """add_module(module: class, settings) -> ModuleDescriptor
@@ -1676,6 +1644,8 @@ class ModuleRegistry(DBRegistry):
                     if hasattr(descriptor, 'module'):
                         self.auto_add_ports(descriptor.module)
                         added_descriptors.add(descriptor)
+        except MissingRequirement:
+            raise
         except Exception, e:
             raise package.InitializationFailed(package, 
                                                [traceback.format_exc()])
@@ -1966,6 +1936,15 @@ class ModuleRegistry(DBRegistry):
         return [self.get_descriptor(klass)
                 for klass in descriptor.module.mro()
                 if issubclass(klass, vistrails.core.modules.vistrails_module.Module)]
+
+    def get_descriptor_subclasses(self, descriptor):
+        # need to find all descriptors that are subdescriptors of descriptor
+        sub_list = []
+        for pkg in self.package_versions.itervalues():
+            for d in pkg.descriptor_list:
+                if self.is_descriptor_subclass(d, descriptor):
+                    sub_list.append(d)
+        return sub_list
         
     def get_input_port_spec(self, module, portName):
         """ get_input_port_spec(module: Module, portName: str) ->
