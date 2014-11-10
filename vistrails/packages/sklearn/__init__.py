@@ -4,8 +4,8 @@ version = '0.15.2'
 
 
 def package_dependencies():
-    import core.packagemanager
-    manager = core.packagemanager.get_package_manager()
+    import vistrails.core.packagemanager
+    manager = vistrails.core.packagemanager.get_package_manager()
     dependencies = []
     if manager.has_package('org.vistrails.vistrails.spreadsheet'):
         dependencies.append('org.vistrails.vistrails.spreadsheet')
@@ -13,10 +13,10 @@ def package_dependencies():
 
 
 def package_requirements():
-    import core.requirements
-    if not core.requirements.python_module_exists('sklearn'):
-        raise core.requirements.MissingRequirement('sklearn')
-    if not core.requirements.python_module_exists('numpy'):
-        raise core.requirements.MissingRequirement('numpy')
-    if not core.requirements.python_module_exists('scipy'):
-        raise core.requirements.MissingRequirement('scipy')
+    import vistrails.core.requirements
+    if not vistrails.core.requirements.python_module_exists('sklearn'):
+        raise vistrails.core.requirements.MissingRequirement('sklearn')
+    if not vistrails.core.requirements.python_module_exists('numpy'):
+        raise vistrails.core.requirements.MissingRequirement('numpy')
+    if not vistrails.core.requirements.python_module_exists('scipy'):
+        raise vistrails.core.requirements.MissingRequirement('scipy')
